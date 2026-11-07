@@ -1,0 +1,99 @@
+# Local stack: the production image backed by PostgreSQL, plus Mailpit.
+#
+#   docker compose up --build -d                  # app on http://localhost:8080
+#   docker compose --profile mysql up -d mysql    # MySQL instead, see README
+#
+# Only the databases are needed if you run `composer dev` on the host:
+#
+#   docker compose up -d pgsql mailpit
+#
+# APP_KEY and other values are read from your .env file.
+
+services:
+    app:
+        build:
+            context: .
+            args:
+                # Demo build: includes Faker so placeholder users can be seeded.
+                # Production builds (plain `docker build .`) leave dev packages out.
+                COMPOSER_DEV: 'true'
+        image: laravel-blade-template:demo
+        ports:
+            - '${APP_PORT:-8080}:8080'
+        environment:
+            APP_NAME: '${APP_NAME:-Acme Console}'
+            APP_KEY: '${APP_KEY:?Run "php artisan key:generate" first}'
+            APP_URL: 'http://localhost:${APP_PORT:-8080}'
+            # Fixed values, so local settings in .env don't leak into the container.
+            APP_ENV: production
+            APP_DEBUG: 'false'
+            DB_CONNECTION: pgsql
+            DB_HOST: pgsql
+            DB_PORT: 5432
+            DB_DATABASE: '${DB_DATABASE:-laravel}'
+            DB_USERNAME: '${DB_USERNAME:-laravel}'
+            DB_PASSWORD: '${DB_PASSWORD:-secret}'
+            MAIL_MAILER: smtp
+            MAIL_HOST: mailpit
+            MAIL_PORT: 1025
+            RUN_MIGRATIONS: 'true'
+            SEED_DEMO_DATA: '${SEED_DEMO_DATA:-true}'
+        depends_on:
+            pgsql:
+                condition: service_healthy
+
+    pgsql:
+        image: postgres:18-alpine
+        ports:
+            - '${FORWARD_DB_PORT:-5432}:5432'
+        environment:
+            POSTGRES_DB: '${DB_DATABASE:-laravel}'
+            POSTGRES_USER: '${DB_USERNAME:-laravel}'
+            POSTGRES_PASSWORD: '${DB_PASSWORD:-secret}'
+        volumes:
+            - pgsql-data:/var/lib/postgresql
+        healthcheck:
+            test:
+                [
+                    'CMD-SHELL',
+                    'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"',
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    mysql:
+        image: mysql:8.4
+        profiles: [mysql]
+        ports:
+            - '${FORWARD_MYSQL_PORT:-3306}:3306'
+        environment:
+            MYSQL_DATABASE: '${DB_DATABASE:-laravel}'
+            MYSQL_USER: '${DB_USERNAME:-laravel}'
+            MYSQL_PASSWORD: '${DB_PASSWORD:-secret}'
+            MYSQL_ROOT_PASSWORD: '${DB_PASSWORD:-secret}'
+        volumes:
+            - mysql-data:/var/lib/mysql
+        healthcheck:
+            test:
+                [
+                    'CMD',
+                    'mysqladmin',
+                    'ping',
+                    '-h',
+                    '127.0.0.1',
+                    '-p$${MYSQL_ROOT_PASSWORD}',
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+
+    mailpit:
+        image: axllent/mailpit:latest
+        ports:
+            - '${FORWARD_MAILPIT_PORT:-1025}:1025'
+            - '${FORWARD_MAILPIT_DASHBOARD_PORT:-8025}:8025'
+
+volumes:
+    pgsql-data:
+    mysql-data:
